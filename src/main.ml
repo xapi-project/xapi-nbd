@@ -86,7 +86,7 @@ let with_attached_vdi sr vdi read_write f =
 
 let ignore_exn t () = Lwt.catch t (fun _ -> Lwt.return_unit)
 
-let handle_connection fd =
+let handle_connection fd tls_role =
 
   let with_session rpc uri f =
     ( match Uri.user uri, Uri.password uri, Uri.get_query_param uri "session_id" with
@@ -126,9 +126,8 @@ let handle_connection fd =
       )
   in
 
-  let channel = Nbd_lwt_unix.of_fd fd in
-  Lwt.finalize
-    (fun () ->
+  Nbd_lwt_unix.with_channel fd tls_role
+    (fun channel ->
        Nbd_lwt_unix.Server.connect channel ()
        >>= fun (export_name, t) ->
        Lwt.finalize
@@ -139,10 +138,20 @@ let handle_connection fd =
          )
          (fun () -> Nbd_lwt_unix.Server.close t)
     )
-    (* ignore the exception resulting from double-closing the socket *)
-    (ignore_exn channel.close)
 
-let main port =
+(* TODO use the version from nbd repository *)
+let init_tls_get_server_ctx ~certfile ~ciphersuites no_tls =
+  if no_tls then None
+  else (
+    let certfile = require_str "certfile" certfile in
+    let ciphersuites = require_str "ciphersuites" ciphersuites in
+    Some (Nbd_lwt_unix.TlsServer
+      (Nbd_lwt_unix.init_tls_get_ctx ~certfile ~ciphersuites)
+    )
+  )
+
+let main port certfile ciphersuites no_tls =
+  let tls_role = init_tls_get_server_ctx ~certfile ~ciphersuites no_tls in
   let t =
     let sock = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
     Lwt.finalize
@@ -159,7 +168,7 @@ let main port =
              Lwt.catch
                (fun () ->
                   Lwt.finalize
-                    (fun () -> handle_connection fd)
+                    (fun () -> handle_connection fd tls_role)
                     (* ignore the exception resulting from double-closing the socket *)
                     (ignore_exn (fun () -> Lwt_unix.close fd))
                )
@@ -188,16 +197,28 @@ let help = [
   `S "BUGS"; `P (Printf.sprintf "Check bug reports at %s" project_url);
 ]
 
+let certfile =
+  let doc = "Path to file containing TLS certificate." in
+  Arg.(value & opt string "" & info ["certfile"] ~doc)
+let ciphersuites =
+  let doc = "Set of ciphersuites for TLS (specified in the format accepted by OpenSSL, stunnel etc.)" in
+  Arg.(value & opt string "!EXPORT:RSA+AES128-SHA256" & info ["ciphersuites"] ~doc)
+let no_tls =
+  let doc = "Use NOTLS mode (refusing TLS) instead of the default FORCEDTLS." in
+  Arg.(value & flag & info ["no-tls"] ~doc)
+
 let cmd =
   let doc = "Expose VDIs over authenticated NBD connections" in
   let man = [
     `S "DESCRIPTION";
     `P "Expose all accessible VDIs over NBD. Every VDI is addressible through a URI, where the URI will be authenticated by xapi.";
   ] @ help in
+  (* TODO for port, certfile, ciphersuites and no_tls: use definitions from nbd repository. *)
+  (* But consider making ciphersuites mandatory here in a local definition. *)
   let port =
     let doc = "Local port to listen for connections on" in
     Arg.(value & opt int 10809 & info [ "port" ] ~doc) in
-  Term.(ret (pure main $ port)),
+  Term.(ret (pure main $ port $ certfile $ ciphersuites $ no_tls)),
   Term.info "xapi-nbd" ~version:"1.0.0" ~doc ~man ~sdocs:_common_options
 
 let _ =
