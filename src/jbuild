@@ -10,6 +10,7 @@
     message_switch.lwt
     mirage-block-unix
     nbd.lwt
+    systemd
     uri
     uuidm
     xcp.storage

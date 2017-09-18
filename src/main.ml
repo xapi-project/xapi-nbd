@@ -143,18 +143,28 @@ let init_tls_get_server_ctx ~certfile ~ciphersuites no_tls =
     )
   )
 
+let init_socket () =
+  (* Notify systemd software watchdog every second *)
+  Lwt_engine.on_timer 1.0 true (fun _ -> Daemon.notify Watchdog |> ignore) |> ignore;
+  Daemon.(notify State.Ready) |> ignore;
+  match Daemon.listen_fds () with
+  | [] ->
+      Lwt.fail_with "No file descriptors passed by the system manager"
+  | fd::_ ->
+    Lwt_log.notice "socket activation succeded" >|= fun () ->
+    fd
+
 let main port xen_api_uri certfile ciphersuites no_tls =
   let t () =
     Lwt_log.notice_f "Starting xapi-nbd: port = '%d'; xen_api_uri = '%s'; certfile = '%s'; ciphersuites = '%s' no_tls = '%b'" port xen_api_uri certfile ciphersuites no_tls >>= fun () ->
     Lwt_log.notice "Initialising TLS" >>= fun () ->
     let tls_role = init_tls_get_server_ctx ~certfile ~ciphersuites no_tls in
-    let sock = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+    init_socket () >>= fun fd ->
+    let sock = Lwt_unix.of_unix_file_descr fd in
     Lwt.finalize
       (fun () ->
          Lwt_log.notice "Setting up server socket" >>= fun () ->
          Lwt_unix.setsockopt sock Lwt_unix.SO_REUSEADDR true;
-         let sockaddr = Lwt_unix.ADDR_INET(Unix.inet_addr_any, port) in
-         Lwt_unix.bind sock sockaddr;
          Lwt_unix.listen sock 5;
          Lwt_log.notice "Listening for incoming connections" >>= fun () ->
          let rec loop () =
