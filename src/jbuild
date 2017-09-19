@@ -5,6 +5,8 @@
   (public_name xapi-nbd)
   (libraries
    (cmdliner
+    inotify
+    inotify.lwt
     lwt
     lwt.unix
     message_switch.lwt
