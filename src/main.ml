@@ -132,13 +132,59 @@ let handle_connection xen_api_uri fd tls_role =
          )
     )
 
+let wait_for_file_to_appear path timeout () =
+  let wait () =
+    Lwt_inotify.create () >>= fun inotify ->
+    Lwt.finalize
+      (fun () ->
+         let dir = Filename.dirname path in
+         let filename = Filename.basename path in
+         Lwt_inotify.add_watch inotify dir [Inotify.S_Create] >>= fun watch ->
+         Lwt.finalize
+           (fun () ->
+              (* Check file existence after adding watch to avoid a race *)
+              Lwt_unix.file_exists path >>= fun exists ->
+              if exists then
+                Lwt.return_unit
+              else begin
+                Lwt_log.notice_f "File '%s' does not exist, waiting for it to be created using inotify" path >>= fun () ->
+                let rec loop () =
+                  Lwt_inotify.read inotify >>= fun event ->
+                  Lwt_log.notice_f "Received inotify event: %s" (Inotify.string_of_event event) >>= fun () ->
+                  let (_watch, kinds, cookie, event_filename) = event in
+                  match event_filename with
+                  | Some event_filename when event_filename = filename ->
+                    if List.exists ((=) Inotify.Create) kinds then
+                      (* The file we've been waiting for has been created *)
+                      Lwt.return_unit
+                    else loop ()
+                  | _ -> loop ()
+                in loop ()
+              end)
+           (fun () -> Lwt_inotify.rm_watch inotify watch)
+      )
+      (fun () -> Lwt_inotify.close inotify)
+  in
+
+  let timeout =
+    let timeout = 5.0 in
+    Lwt_unix.sleep timeout >>= fun () ->
+    let msg = Printf.sprintf "File '%s' did not appear in %f seconds" path timeout in
+    Lwt_log.fatal msg >>= fun () ->
+    Lwt.fail_with msg
+  in
+
+  Lwt.pick [wait (); timeout]
+
 (* TODO use the version from nbd repository *)
 let init_tls_get_server_ctx ~certfile ~ciphersuites no_tls =
-  if no_tls then None
+
+  if no_tls then Lwt.return_none
   else (
+    wait_for_file_to_appear certfile 5.0 () >>= fun () ->
     let certfile = require_str "certfile" certfile in
     let ciphersuites = require_str "ciphersuites" ciphersuites in
-    Some (Nbd_lwt_unix.TlsServer
+    Lwt.return_some (Nbd_lwt_unix.TlsServer
       (Nbd_lwt_unix.init_tls_get_ctx ~certfile ~ciphersuites)
     )
   )
@@ -158,7 +204,7 @@ let main port xen_api_uri certfile ciphersuites no_tls =
   let t () =
     Lwt_log.notice_f "Starting xapi-nbd: port = '%d'; xen_api_uri = '%s'; certfile = '%s'; ciphersuites = '%s' no_tls = '%b'" port xen_api_uri certfile ciphersuites no_tls >>= fun () ->
     Lwt_log.notice "Initialising TLS" >>= fun () ->
-    let tls_role = init_tls_get_server_ctx ~certfile ~ciphersuites no_tls in
+    init_tls_get_server_ctx ~certfile ~ciphersuites no_tls >>= fun tls_role ->
     init_socket () >>= fun fd ->
     let sock = Lwt_unix.of_unix_file_descr fd in
     Lwt.finalize

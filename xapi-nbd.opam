@@ -8,6 +8,7 @@ build: [[ "jbuilder" "build" "-p" name "-j" jobs ]]
 depends: [
   "jbuilder" {build}
   "cmdliner"
+  "inotify"
   "lwt" {< "3.0.0"}
   "mirage-block-unix"
   "nbd" {>= "2.0.1"}
