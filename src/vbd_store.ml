@@ -16,7 +16,7 @@ let create_dir_if_doesnt_exist () =
     (function
       | Unix.(Unix_error (EEXIST, "mkdir", dir)) when dir = Consts.xapi_nbd_persistent_dir -> Lwt.return_unit
       | e ->
-        (* In this we should let the client fail and the user/admin fix the permission/space/... issue that caused the failure *)
+        (* In any other case we let the client fail. In this case the user/admin should go and fix the root cause of the issue *)
         log_and_reraise_error "Failed to create directory" e
     )
 
@@ -33,7 +33,7 @@ let transform_vbd_list f =
         (function
           | Unix.(Unix_error (ENOENT, "open", file)) when file = vbd_list_file -> Lwt.return []
           | e ->
-            (* In this we should let the client fail and the user/admin fix the permission/... issue that caused the failure *)
+            (* In any other case we let the client fail. In this case the user/admin should go and fix the root cause of the issue *)
             log_and_reraise_error ("Failed to read file " ^ vbd_list_file) e
         )
       >>= fun l ->
