@@ -12,4 +12,4 @@ let project_url = "http://github.com/xapi-project/xapi-nbd"
 
 let xapi_nbd_persistent_dir = "/var/lib/xapi-nbd"
 
-let vbd_list_file = xapi_nbd_persistent_dir ^ "/VBDs_to_clean_up"
+let vbd_list_file_name = "VBDs_to_clean_up"

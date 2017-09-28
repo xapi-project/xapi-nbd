@@ -96,6 +96,9 @@ let init_tls_get_server_ctx ~certfile ~ciphersuites no_tls =
 let main port certfile ciphersuites no_tls =
   let t () =
     Lwt_log.notice_f "Starting xapi-nbd: port = '%d'; certfile = '%s'; ciphersuites = '%s' no_tls = '%b'" port certfile ciphersuites no_tls >>= fun () ->
+    (* We keep a persistent record of the VBDs that we've created but haven't
+       yet cleaned up. At startup we go through this list in case some VBDs
+       got leaked after the previous run due to a crash and clean them up. *)
     Cleanup.Persistent.cleanup () >>= fun () ->
     Lwt_log.notice "Initialising TLS" >>= fun () ->
     let tls_role = init_tls_get_server_ctx ~certfile ~ciphersuites no_tls in
@@ -182,6 +185,9 @@ let setup_logging () =
   Lwt_log.add_rule "*" Lwt_log.Notice
 
 let () =
+  (* We keep track of the VBDs we've created but haven't yet cleaned up, and
+     when we receive a SIGTERM or SIGINT signal, we clean up these leftover
+     VBDs first and then fail with an exception. *)
   Cleanup.Runtime.register_signal_handler ();
   setup_logging ();
   match Term.eval cmd with

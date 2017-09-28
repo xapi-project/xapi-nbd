@@ -11,8 +11,6 @@ let local_login () =
   Xen_api.Session.login_with_password ~rpc ~uname:"" ~pwd:"" ~version:"1.0" ~originator:"xapi-nbd" >|= fun session_id ->
   (rpc, session_id)
 
-(* Each with_tracking function guarantees to clean up the resources as
-   long as the function passed to it also guarantees the same. *)
 
 module VBD = struct
   let cleanup_vbd rpc session_id vbd =
@@ -48,6 +46,8 @@ module VBD = struct
 
   module Persistent = struct
 
+    (* [with_tracking rpc session_id vbd f] guarantees to clean up the VBD
+       as long as [vbd] is unplugged and [f] also guarantees the same. *)
     let with_tracking rpc session_id vbd f =
       (* Destroy the VBD and exit with the original exception if we fail in the beginning. *)
       let (>>*=) a b =
@@ -152,6 +152,8 @@ module Runtime = struct
   let cleanup_resources signal =
     let cleanup () =
       Lwt_log.warning_f "Caught signal %d, cleaning up" signal >>= fun () ->
+      (* First we have to close the open file descriptors corresponding to the
+         VDIs we plugged to dom0. Otherwise the VDI.unplug call would hang. *)
       ignore_exn_log_error "Caught exception while closing open block devices" (fun () ->
           Block.Runtime.cleanup ())
       >>= fun () ->
