@@ -6,7 +6,11 @@
 
     The {!add} and {!remove} functions, which modify this persistent list,
     first check if the {!Consts.xapi_nbd_persistent_dir} directory exists,
-    and create it if it doesn't.
+    and create it if it doesn't. If the {!Consts.vbd_list_file_name}
+    file does not exist, they assume that the leaked VBD UUID list is
+    empty, and create the file. If any unexpected I/O errors occur, other
+    than the above file and directory not existing, the exception will be
+    propagated to the caller.
 *)
 
 (** [add vbd_uuid] adds [vbd_uuid] to the persistent list of VBD UUIDs, and
