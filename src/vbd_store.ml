@@ -17,7 +17,7 @@ let create_dir_if_doesnt_exist () =
       | Unix.(Unix_error (EEXIST, "mkdir", dir)) when dir = Consts.xapi_nbd_persistent_dir -> Lwt.return_unit
       | e ->
         (* In any other case we let the client fail. In this case the user/admin should go and fix the root cause of the issue *)
-        log_and_reraise_error "Failed to create directory" e
+        log_and_reraise_error ("Failed to create directory " ^ Consts.xapi_nbd_persistent_dir) e
     )
 
 let transform_vbd_list f =
