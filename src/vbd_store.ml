@@ -58,7 +58,8 @@ let get_all () =
   Lwt_unix.file_exists vbd_list_file >>= fun exists ->
   if exists then
     Lwt_mutex.with_lock m (fun () ->
-        Lwt.catch (fun () -> Lwt_io.lines_of_file vbd_list_file |> Lwt_stream.to_list)
+        Lwt.catch
+          (fun () -> Lwt_io.lines_of_file vbd_list_file |> Lwt_stream.to_list)
           (log_and_reraise_error ("Failed to read " ^ vbd_list_file))
       )
   else
