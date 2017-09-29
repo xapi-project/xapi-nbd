@@ -23,7 +23,7 @@ module Local_xapi_session = struct
       Lwt.fail_with msg
     in
 
-    Lwt_log.notice_f "Trying to log in via xapi's Unix domain socket for %f seconds" Consts.wait_for_xapi_timeout_seconds >>= fun () ->
+    Lwt_log.notice_f "Will try to log in via xapi's Unix domain socket for %f seconds" Consts.wait_for_xapi_timeout_seconds >>= fun () ->
     Lwt.pick [loop (); timeout ()] >|= fun session_id ->
     (rpc, session_id)
 
