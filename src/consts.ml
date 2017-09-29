@@ -17,7 +17,7 @@ let vbd_list_file_name = "VBDs_to_clean_up"
 (** When logging in via xapi's Unix domain socket to perform some cleanups, we
     keep trying to log in up to this many seconds, because xapi may not be
     ready when xapi-nbd starts up. *)
-let wait_for_xapi_timeout_seconds = 120.0
+let wait_for_xapi_timeout_seconds = 300.0
 
 (** We sleep for this many seconds before the next login attempt. *)
 let wait_for_xapi_retry_delay_seconds = 4.0
