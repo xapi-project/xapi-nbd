@@ -4,6 +4,12 @@
 
 val ignore_exn_log_error : string -> (unit -> unit Lwt.t) -> unit Lwt.t
 
+module Local_xapi_session : sig
+  val with_session :
+    ((Rpc.call -> Rpc.response Lwt.t) -> string -> 'a Lwt.t) ->
+    'a Lwt.t
+end
+
 module VBD : sig
   val with_vbd :
     vDI:[ `VDI ] API.Ref.t ->
