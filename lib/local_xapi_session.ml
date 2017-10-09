@@ -40,13 +40,6 @@ let wait_for_xapi_and_login () =
   Lwt.pick [loop (); timeout ()] >|= fun session_id ->
   (rpc, session_id)
 
-(** [with_session f] logs in as the local superuser via xapi's local Unix
-    domain socket, and takes care to close the session when [f] finishes. It
-    keeps retrying the login requests up to
-    {!Consts.wait_for_xapi_timeout_seconds} seconds. If it does not manage to
-    log in before this timeout, it fails with an exception. It waits for
-    {!Consts.wait_for_xapi_retry_delay_seconds} seconds between subsequent
-    login attempts. *)
 let with_session f =
   wait_for_xapi_and_login () >>= fun (rpc, session_id) ->
   Lwt.finalize

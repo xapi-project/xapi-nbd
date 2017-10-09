@@ -1,14 +1,3 @@
-
-(library
- ((name vbd_store)
-  (libraries
-   (lwt
-    lwt.unix)
-  )
-  (modules vbd_store)
- )
-)
-
 (library
  ((name consts)
   (modules consts)
@@ -18,7 +7,22 @@
 (library
  ((name local_xapi_session)
   (modules local_xapi_session)
-  (libraries (consts lwt lwt.unix
-    xen-api-client.lwt))
+  (libraries
+   (consts
+    lwt
+    lwt.unix
+    xen-api-client.lwt
+   )
+  )
+ )
+)
+
+(library
+ ((name vbd_store)
+  (libraries
+   (lwt
+    lwt.unix)
+  )
+  (modules vbd_store)
  )
 )

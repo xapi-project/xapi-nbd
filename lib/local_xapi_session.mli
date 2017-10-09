@@ -12,6 +12,13 @@
  * GNU Lesser General Public License for more details.
  *)
 
+(** [with_session f] logs in as the local superuser via xapi's local Unix
+    domain socket, and takes care to close the session when [f] finishes. It
+    keeps retrying the login requests up to
+    {!Consts.wait_for_xapi_timeout_seconds} seconds. If it does not manage to
+    log in before this timeout, it fails with an exception. It waits for
+    {!Consts.wait_for_xapi_retry_delay_seconds} seconds between subsequent
+    login attempts. *)
 val with_session :
   ((Rpc.call -> Rpc.response Lwt.t) -> [`session] API.Ref.t -> 'a Lwt.t) ->
   'a Lwt.t
