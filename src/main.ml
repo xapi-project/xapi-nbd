@@ -88,8 +88,8 @@ let init_tls_get_server_ctx ~certfile ~ciphersuites =
   )
 
 let xapi_says_use_tls () =
-  let refuse msg = (
-    Lwt_log.notice msg >>=
+  let refuse log msg = (
+    log msg >>=
     (fun () -> Lwt.fail_with msg)
   ) in
   let ask_xapi rpc session_id =
@@ -100,10 +100,10 @@ let xapi_says_use_tls () =
     let tls = List.mem `nbd all_porpoises in
     let no_tls = List.mem `insecure_nbd all_porpoises in
     match tls, no_tls with
-    | true, true -> refuse "Contradictory XenServer configuration: nbd and insecure_nbd network purposes!"
+    | true, true -> refuse Lwt_log.error "Contradictory XenServer configuration: nbd and insecure_nbd network purposes! Refusing connection."
     | true, false -> Lwt.return true
     | false, true -> Lwt.return false
-    | false, false -> refuse "No network has purpose nbd or insecure_nbd."
+    | false, false -> refuse Lwt_log.warning "Refusing connection: no network has purpose nbd or insecure_nbd:"
   in
   Local_xapi_session.with_session ask_xapi
 
