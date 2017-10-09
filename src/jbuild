@@ -5,9 +5,11 @@
   (public_name xapi-nbd)
   (libraries
    (cmdliner
+    consts
     lwt
     lwt.unix
     mirage-block-unix
+    local_xapi_session
     nbd.lwt
     uri
     uuidm

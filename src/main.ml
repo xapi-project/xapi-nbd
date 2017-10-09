@@ -105,7 +105,7 @@ let xapi_says_use_tls () =
     | false, true -> Lwt.return false
     | false, false -> refuse "No network has purpose nbd or insecure_nbd."
   in
-  Cleanup.Local_xapi_session.with_session ask_xapi
+  Local_xapi_session.with_session ask_xapi
 
 let main port certfile ciphersuites =
   let t () =
