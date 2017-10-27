@@ -69,7 +69,7 @@ let handle_connection fd tls_role =
       )
   in
 
-  Nbd_lwt_unix.with_channel fd tls_role
+  Nbd_lwt_unix.with_channel ~timeout_seconds:Consts.socket_timeout_seconds fd tls_role
     (fun channel ->
        Nbd_lwt_unix.Server.with_connection channel
          (fun export_name svr ->
@@ -146,8 +146,9 @@ let main port certfile ciphersuites =
                (fun () ->
                   Lwt.finalize
                     (fun () -> (
-                      inc_conn () >>=
-                      xapi_says_use_tls >>=
+                      inc_conn () >>= fun () ->
+                      Lwt_unix.setsockopt fd Lwt_unix.SO_KEEPALIVE true;
+                      xapi_says_use_tls () >>=
                       fun tls -> (
                         let tls_role = if tls then tls_server_role else None in
                         handle_connection fd tls_role)
