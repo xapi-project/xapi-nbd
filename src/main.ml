@@ -145,14 +145,12 @@ let main port certfile ciphersuites =
              ignore_exn_log_error "Caught exception while handling client"
                (fun () ->
                   Lwt.finalize
-                    (fun () -> (
+                    (fun () ->
                       inc_conn () >>= fun () ->
                       Lwt_unix.setsockopt fd Lwt_unix.SO_KEEPALIVE true;
-                      xapi_says_use_tls () >>=
-                      fun tls -> (
-                        let tls_role = if tls then tls_server_role else None in
-                        handle_connection fd tls_role)
-                      )
+                      xapi_says_use_tls () >>= fun tls ->
+                      let tls_role = if tls then tls_server_role else None in
+                      handle_connection fd tls_role
                     )
                     (* ignore the exception resulting from double-closing the socket *)
                     (fun () ->
