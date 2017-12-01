@@ -24,3 +24,7 @@ let wait_for_xapi_retry_delay_seconds = 4.0
 
 (** Allow no more than this many client connections. *)
 let connection_limit = 16
+
+(** Disconnect any client connection that keeps us waiting this long
+    for a read or write. *)
+let socket_timeout_seconds = 17.0
