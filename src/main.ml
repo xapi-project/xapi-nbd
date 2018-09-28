@@ -16,6 +16,30 @@ open Lwt.Infix
 (* Xapi external interfaces: *)
 module Xen_api = Xen_api_lwt_unix
 
+module SM = Storage_interface.StorageAPI(Rpc_lwt.GenClient ())
+
+let rpc =
+  let (>>*=) m f = m >>= function
+    | `Ok x -> f x
+    | `Error e ->
+      let b = Buffer.create 16 in
+      let fmt = Format.formatter_of_buffer b in
+      Message_switch_lwt.Protocol_lwt.Client.pp_error fmt e;
+      Format.pp_print_flush fmt ();
+      Lwt.fail (Failure (Buffer.contents b))
+  in
+  (* A global connection for the lifetime of this process *)
+  let switch =
+    Message_switch_lwt.Protocol_lwt.Client.connect ~switch:!Xcp_client.switch_path ()
+    >>*= fun switch ->
+    Lwt.return switch
+  in
+  fun call ->
+    switch >>= fun switch ->
+    Message_switch_lwt.Protocol_lwt.Client.rpc ~t:switch ~queue:!Storage_interface.queue_name ~body:(Jsonrpc.string_of_call call) ()
+    >>*= fun result ->
+    Lwt.return (Jsonrpc.response_of_string result)
+
 let ignore_exn_delayed t () = Lwt.catch t (fun _ -> Lwt.return_unit)
 let ignore_exn_log_error = Cleanup.ignore_exn_log_error
 
@@ -27,17 +51,22 @@ let require name arg = match arg with
 let require_str name arg =
   require name (if arg = "" then None else Some arg)
 
-let with_attached_vdi vDI rpc session_id f =
-  Lwt_log.notice "Looking up control domain UUID in xensource inventory" >>= fun () ->
-  Inventory.inventory_filename := Consts.xensource_inventory_filename;
-  let control_domain_uuid = Inventory.lookup Inventory._control_domain_uuid in
-  Lwt_log.notice "Found control domain UUID" >>= fun () ->
-  Xen_api.VM.get_by_uuid ~rpc ~session_id ~uuid:control_domain_uuid
-  >>= fun control_domain ->
-  Cleanup.VBD.with_vbd ~vDI ~vM:control_domain ~mode:`RO ~rpc ~session_id (fun vbd ->
-      Xen_api.VBD.get_device ~rpc ~session_id ~self:vbd
-      >>= fun device ->
-      f ("/dev/" ^ device))
+let with_attached_vdi sr vdi read_write f =
+  let (>>*=) a b =
+    (a |> Rpc_lwt.T.get) >>= function
+    | Ok x -> b x
+    | Error e -> Lwt.fail (Storage_interface.Storage_error e)
+  in
+  let pid = Unix.getpid () in
+  let connection_uuid = Uuidm.v `V4 |> Uuidm.to_string in
+  let datapath_id = Printf.sprintf "xapi-nbd/%s/%s/%d" (Storage_interface.Vdi.string_of vdi) connection_uuid pid in
+  let dbg = Printf.sprintf "xapi-nbd:with_attached_vdi/%s" datapath_id in
+  SM.DP.create rpc dbg datapath_id >>*= fun dp ->
+  SM.VDI.attach2 rpc dbg dp sr vdi read_write >>*= fun backend ->
+  SM.VDI.activate rpc dbg dp sr vdi >>*= fun () ->
+  f backend >>= fun r ->
+  SM.DP.destroy rpc dbg dp true >>*= fun () ->
+  Lwt.return r
 
 let handle_connection fd tls_role =
 
@@ -55,15 +84,46 @@ let handle_connection fd tls_role =
     f uri rpc session_id
   in
 
-
   let serve t uri rpc session_id =
     let path = Uri.path uri in (* note preceeding / *)
     let vdi_uuid = if path <> "" then String.sub path 1 (String.length path - 1) else path in
-    Xen_api.VDI.get_by_uuid ~rpc ~session_id ~uuid:vdi_uuid
-    >>= fun vdi_ref ->
-    with_attached_vdi vdi_ref rpc session_id
-      (fun filename ->
-         Cleanup.Block.with_block filename (Nbd_lwt_unix.Server.serve t ~read_only:true (module Block))
+    Xen_api.VDI.get_by_uuid ~rpc ~session_id ~uuid:vdi_uuid >>= fun vdi ->
+    Xen_api.VDI.get_record ~rpc ~session_id ~self:vdi >>= fun vdi_rec ->
+    Xen_api.SR.get_uuid ~rpc ~session_id ~self:vdi_rec.API.vDI_SR >|= Storage_interface.Sr.of_string >>= fun sr ->
+    let vdi = Storage_interface.Vdi.of_string vdi_rec.API.vDI_location in
+    let read_only = true in
+    with_attached_vdi sr vdi (not read_only)
+      (fun backend ->
+         let _xendisks, blockdevs, files, nbds = Storage_interface.implementations_of_backend backend in
+         match files, blockdevs, nbds with
+         | {Storage_interface.path}::_, _, _ | _, {Storage_interface.path}::_, _ ->
+           Cleanup.Block.with_block path (Nbd_lwt_unix.Server.serve t ~read_only (module Block))
+         | _, _, nbd::_ ->
+           begin match Nbd.Nbd_uri.parse nbd.Storage_interface.uri with
+             | Ok (conn, exportname) ->
+               let exportname =
+                 match exportname with
+                 | None -> ""
+                 | Some n -> n
+               in
+               Nbd_lwt_unix.with_channel_of_connection conn
+                 (fun chan ->
+                    Nbd.Client.connect chan >>= fun c ->
+                    Nbd.Client.negotiate_structured_reply c >>=
+                    (function
+                      | Ok () -> Lwt.return_unit
+                      | Error e -> Lwt_log.warning_f "Failed to negotiate structured replies: %s" (Nbd.Protocol.OptionError.to_string e)) >>= fun () ->
+                    Nbd.Client.request_export c exportname >>=
+                    (function
+                      | Ok c -> Lwt.return c
+                      | Error e -> Lwt.fail_with ("Failed to request export: " ^ (Nbd.Protocol.OptionError.to_string e))) >>= fun (c, _diskinfo, _blocksizes) ->
+                    Nbd_lwt_unix.Server.proxy t ~read_only (module Nbd.Client) c
+                 )
+             | Error () ->
+               Lwt.fail_with "invalid NBD uri"
+           end
+         | [], [], [] ->
+           Lwt.fail_with "No file, block device, or NBD export returned from attach"
       )
   in
 
@@ -71,9 +131,9 @@ let handle_connection fd tls_role =
     (fun channel ->
        Nbd_lwt_unix.Server.with_connection channel
          (fun export_name svr ->
-           let rpc = Xen_api.make Consts.xapi_unix_domain_socket_uri in
-           let uri = Uri.of_string export_name in
-           with_session rpc uri (serve svr)
+            let rpc = Xen_api.make Consts.xapi_unix_domain_socket_uri in
+            let uri = Uri.of_string export_name in
+            with_session rpc uri (serve svr)
          )
     )
 
@@ -82,8 +142,8 @@ let init_tls_get_server_ctx ~certfile ~ciphersuites =
   let certfile = require_str "certfile" certfile in
   let ciphersuites = require_str "ciphersuites" ciphersuites in
   Some (Nbd_lwt_unix.TlsServer
-    (Nbd_lwt_unix.init_tls_get_ctx ~curve:"secp384r1" ~certfile ~ciphersuites)
-  )
+          (Nbd_lwt_unix.init_tls_get_ctx ~curve:"secp384r1" ~certfile ~ciphersuites)
+       )
 
 let xapi_says_use_tls () =
   let refuse log msg = (
@@ -94,7 +154,7 @@ let xapi_says_use_tls () =
     Xen_api.Network.get_all_records ~rpc ~session_id >>=
     fun all_nets ->
     let all_porpoises = List.map (fun (_str, net) -> net.API.network_purpose) all_nets |>
-    List.flatten in
+                        List.flatten in
     let tls = List.mem `nbd all_porpoises in
     let no_tls = List.mem `insecure_nbd all_porpoises in
     match tls, no_tls with
@@ -127,11 +187,11 @@ let main port certfile ciphersuites =
          let conn_count = ref 0 in
          let conn_m = Lwt_mutex.create () in
          let inc_conn ?(i=1) () = Lwt_mutex.with_lock conn_m (fun () ->
-           conn_count := !conn_count + i;
-           if !conn_count > Consts.connection_limit && i > 0
-           then Lwt.fail_with ("Server busy: already at maximum "^(string_of_int Consts.connection_limit)^" connections.")
-           else Lwt.return ()
-         ) in
+             conn_count := !conn_count + i;
+             if !conn_count > Consts.connection_limit && i > 0
+             then Lwt.fail_with ("Server busy: already at maximum "^(string_of_int Consts.connection_limit)^" connections.")
+             else Lwt.return ()
+           ) in
          let dec_conn () = inc_conn ~i:(-1) () in
 
          let rec loop () =
@@ -144,17 +204,17 @@ let main port certfile ciphersuites =
                (fun () ->
                   Lwt.finalize
                     (fun () -> (
-                      inc_conn () >>=
-                      xapi_says_use_tls >>=
-                      fun tls -> (
-                        let tls_role = if tls then tls_server_role else None in
-                        handle_connection fd tls_role)
-                      )
+                         inc_conn () >>=
+                         xapi_says_use_tls >>=
+                         fun tls -> (
+                           let tls_role = if tls then tls_server_role else None in
+                           handle_connection fd tls_role)
+                       )
                     )
                     (* ignore the exception resulting from double-closing the socket *)
                     (fun () ->
-                      ignore_exn_delayed (fun () -> Lwt_unix.close fd) () >>=
-                      dec_conn
+                       ignore_exn_delayed (fun () -> Lwt_unix.close fd) () >>=
+                       dec_conn
                     )
                )
            in
@@ -166,12 +226,12 @@ let main port certfile ciphersuites =
   in
   (* Log unexpected exceptions *)
   let () = Lwt_main.run
-    (Lwt.catch t
-       (fun e ->
-          Lwt_log.fatal_f "Caught unexpected exception: %s" (Printexc.to_string e) >>= fun () ->
-          Lwt.fail e
-       )
-    )
+      (Lwt.catch t
+         (fun e ->
+            Lwt_log.fatal_f "Caught unexpected exception: %s" (Printexc.to_string e) >>= fun () ->
+            Lwt.fail e
+         )
+      )
   in
 
   `Ok ()

@@ -7,11 +7,14 @@
   local_xapi_session
   lwt
   lwt.unix
+  message-switch-lwt
   mirage-block-unix
   nbd-lwt-unix
+  rpclib-lwt
   uri
   uuidm
   vbd_store
   xapi-inventory
+  xapi-idl.storage
   xen-api-client-lwt)
 )

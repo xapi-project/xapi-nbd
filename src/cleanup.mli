@@ -25,15 +25,15 @@ module VBD : sig
     mode:[ `RO | `RW ] ->
     rpc:(Rpc.call -> Rpc.response Lwt.t) ->
     session_id: [`session ] API.Ref.t -> ([ `VBD ] API.Ref.t -> unit Lwt.t) -> unit Lwt.t
-  (** This function takes care of cleaning up a VBD, and keeps a record of
-      it in case something goes wrong before the cleanups can finish (for
-      example the program is terminated with SIGTREM or it crashes), so
-      that we have a chance of cleaning it up in the signal handler
-      registered by {!Runtime.register_signal_handler}, or in the
-      {!Persistent.cleanup} function.  This function will fail with an
-      exception if the cleanups, the function passed to it, or
-      manipulating the record of VDIs to be cleaned up fails.
-  *)
+    (** This function takes care of cleaning up a VBD, and keeps a record of
+        it in case something goes wrong before the cleanups can finish (for
+        example the program is terminated with SIGTREM or it crashes), so
+        that we have a chance of cleaning it up in the signal handler
+        registered by {!Runtime.register_signal_handler}, or in the
+        {!Persistent.cleanup} function.  This function will fail with an
+        exception if the cleanups, the function passed to it, or
+        manipulating the record of VDIs to be cleaned up fails.
+    *)
 end
 
 module Block : sig

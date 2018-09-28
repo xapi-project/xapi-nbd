@@ -16,6 +16,7 @@ depends: [
   "cmdliner"
   "lwt" {>= "3.0.0"}
   "lwt_log"
+  "message-switch-lwt"
   "mirage-block-unix"
   "nbd-lwt-unix"
   "uri"
