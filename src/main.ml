@@ -84,6 +84,12 @@ let handle_connection fd tls_role =
     f uri rpc session_id
   in
 
+  let is_read_write uri =
+    match Uri.get_query_param uri "rw" with
+    | Some "" -> true
+    | Some _ | None -> false
+  in
+
   let serve t uri rpc session_id =
     let path = Uri.path uri in (* note preceeding / *)
     let vdi_uuid = if path <> "" then String.sub path 1 (String.length path - 1) else path in
@@ -91,7 +97,7 @@ let handle_connection fd tls_role =
     Xen_api.VDI.get_record ~rpc ~session_id ~self:vdi >>= fun vdi_rec ->
     Xen_api.SR.get_uuid ~rpc ~session_id ~self:vdi_rec.API.vDI_SR >|= Storage_interface.Sr.of_string >>= fun sr ->
     let vdi = Storage_interface.Vdi.of_string vdi_rec.API.vDI_location in
-    let read_only = true in
+    let read_only = not (is_read_write uri) || vdi_rec.API.vDI_read_only in
     with_attached_vdi sr vdi (not read_only)
       (fun backend ->
          let _xendisks, blockdevs, files, nbds = Storage_interface.implementations_of_backend backend in
